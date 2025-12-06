@@ -1,93 +1,56 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import GUI from 'lil-gui'
-
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-console.log(GLTFLoader);
 
-/**
- * Base
- */
-// Debug
+
 const gui = new GUI()
-
-// Canvas
 const canvas = document.querySelector('canvas.webgl')
-
-// Scene
 const scene = new THREE.Scene()
 
-/**
- * Floor
- */
+
 const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(10, 10),
-    new THREE.MeshStandardMaterial({
-        color: '#444444',
-        metalness: 0,
-        roughness: 0.5
-    })
+    new THREE.MeshStandardMaterial({ color: '#444444', metalness: 0, roughness: 0.5 })
 )
 floor.receiveShadow = true
-floor.rotation.x = - Math.PI * 0.5
+floor.rotation.x = -Math.PI * 0.5
 scene.add(floor)
 
-/**
- * Lights
- */
+// luces
 const ambientLight = new THREE.AmbientLight(0xffffff, 2.4)
 scene.add(ambientLight)
 
 const directionalLight = new THREE.DirectionalLight(0xffffff, 1.8)
 directionalLight.castShadow = true
-directionalLight.shadow.mapSize.set(1024, 1024)
-directionalLight.shadow.camera.far = 15
-directionalLight.shadow.camera.left = - 7
-directionalLight.shadow.camera.top = 7
-directionalLight.shadow.camera.right = 7
-directionalLight.shadow.camera.bottom = - 7
 directionalLight.position.set(5, 5, 5)
 scene.add(directionalLight)
 
-/**
- * Sizes
- */
+
 const sizes = {
     width: window.innerWidth,
     height: window.innerHeight
 }
 
-window.addEventListener('resize', () =>
-{
-    // Update sizes
+window.addEventListener('resize', () => {
     sizes.width = window.innerWidth
     sizes.height = window.innerHeight
-
-    // Update camera
     camera.aspect = sizes.width / sizes.height
     camera.updateProjectionMatrix()
-
-    // Update renderer
     renderer.setSize(sizes.width, sizes.height)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 })
 
-/**
- * Camera
- */
-// Base camera
+// cámara
 const camera = new THREE.PerspectiveCamera(75, sizes.width / sizes.height, 0.1, 100)
 camera.position.set(2, 2, 2)
 scene.add(camera)
 
-// Controls
 const controls = new OrbitControls(camera, canvas)
 controls.target.set(0, 0.75, 0)
 controls.enableDamping = true
 
-/**
- * Renderer
- */
+// renderer
 const renderer = new THREE.WebGLRenderer({
     canvas: canvas
 })
@@ -96,53 +59,92 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap
 renderer.setSize(sizes.width, sizes.height)
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 
-let mixer = null;
-const gltfLoader = new GLTFLoader();
-gltfLoader.load(
-  '/models/comisaria/scene.gltf',
-function (gltf)  {
-       scene.add(gltf.scene);
+// Modelo y animaciones
+let xiao = null
+let mixer = null
+let idleAction = null
+let walkAction = null
 
-    }
-);
+const speed = 3
+const rotationSpeed = 4
 
-gltfLoader.load(
-  '/models/jill/scene.gltf',
-function (gltf)  {
-       gltf.scene.scale.set(10, 10, 10);
-       gltf.scene.position.set(0.20, 5, 37);
-       scene.add(gltf.scene);
-    }
-);
+const keys = { w: false, a: false, s: false, d: false }
 
+window.addEventListener("keydown", e => {
+    if (keys[e.key.toLowerCase()] !== undefined) keys[e.key.toLowerCase()] = true
+})
 
+window.addEventListener("keyup", e => {
+    if (keys[e.key.toLowerCase()] !== undefined) keys[e.key.toLowerCase()] = false
+})
 
-/**
- * Animate
- */
+const gltfLoader = new GLTFLoader()
+
+// Escenario
+gltfLoader.load('/models/comisaria/scene.gltf', gltf => {
+    scene.add(gltf.scene)
+})
+
+// Personaje Xiao
+gltfLoader.load('/models/xiaowalk.gltf', gltf => {
+
+    xiao = gltf.scene
+    xiao.scale.set(1, 1, 1)
+    xiao.position.set(0, 0, 0)
+    scene.add(xiao)
+
+    mixer = new THREE.AnimationMixer(xiao)
+
+    walkAction = mixer.clipAction(gltf.animations[0])
+
+    const idleClip = THREE.AnimationUtils.subclip(gltf.animations[0], 'idle', 0, 1)
+    idleAction = mixer.clipAction(idleClip)
+
+    idleAction.play()
+})
+
+// Animación
 const clock = new THREE.Clock()
 let previousTime = 0
 
-const tick = () =>
-{
-    const elapsedTime = clock.getElapsedTime()
-    const deltaTime = elapsedTime - previousTime
-    previousTime = elapsedTime
+function tick() {
+    const elapsed = clock.getElapsedTime()
+    const delta = elapsed - previousTime
+    previousTime = elapsed
 
-    // Model animation
-   if(mixer) {
-       mixer.update(deltaTime)
-   }
+    if (mixer) mixer.update(delta)
 
+    if (xiao) {
+        const vel = new THREE.Vector3()
 
-    // Update controls
+        if (keys.w) vel.z -= 1
+        if (keys.s) vel.z += 1
+        if (keys.a) vel.x -= 1
+        if (keys.d) vel.x += 1
+
+        const moving = vel.length() > 0
+
+        if (moving) {
+            idleAction.stop()
+            walkAction.play()
+
+            vel.normalize()
+            xiao.position.addScaledVector(vel, speed * delta)
+
+            const targetDir = vel.clone().normalize()
+            const targetQuat = new THREE.Quaternion()
+            targetQuat.setFromUnitVectors(new THREE.Vector3(0, 0, 1), targetDir)
+            xiao.quaternion.slerp(targetQuat, rotationSpeed * delta)
+
+        } else {
+            walkAction.stop()
+            idleAction.play()
+        }
+    }
+
     controls.update()
-
-    // Render
     renderer.render(scene, camera)
-
-    // Call tick again on the next frame
-    window.requestAnimationFrame(tick)
+    requestAnimationFrame(tick)
 }
 
 tick()
