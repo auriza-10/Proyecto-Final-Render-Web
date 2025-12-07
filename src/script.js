@@ -81,7 +81,7 @@ window.addEventListener("keyup", e => {
 const gltfLoader = new GLTFLoader()
 
 // Escenario
-gltfLoader.load('/models/comisaria/scene.gltf', gltf => {
+gltfLoader.load('/models/sample.gltf', gltf => {
     scene.add(gltf.scene)
 })
 
