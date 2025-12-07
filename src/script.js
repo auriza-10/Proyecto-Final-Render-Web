@@ -7,9 +7,8 @@ import GUI from 'lil-gui'
 const gui = new GUI()
 
 const canvas = document.querySelector('canvas.webgl')
-
 const scene = new THREE.Scene()
-scene.background = new THREE.Color(0x000010);
+scene.background = new THREE.Color(0x000010)
 
 // luces
 const ambientLight = new THREE.AmbientLight(0xffffff, 2.0)
@@ -23,51 +22,43 @@ scene.add(directionalLight)
 
 // fondo estrellado
 function createStarField() {
-    const starCount = 800;
-    const geometry = new THREE.BufferGeometry();
-    const positions = [];
-    const colors = [];
+    const starCount = 800
+    const geometry = new THREE.BufferGeometry()
+    const positions = []
+    const colors = []
 
     for (let i = 0; i < starCount; i++) {
-        const x = (Math.random() - 0.5) * 300;
-        const y = (Math.random() - 0.5) * 200 + 80;
-        const z = (Math.random() - 0.5) * 300;
+        const x = (Math.random() - 0.5) * 300
+        const y = (Math.random() - 0.5) * 200 + 80
+        const z = (Math.random() - 0.5) * 300
 
-        positions.push(x, y, z);
+        positions.push(x, y, z)
 
-        const blue = 0.6 + Math.random() * 0.4;
-        const c = new THREE.Color(0.2, 0.2, blue);
-        colors.push(c.r, c.g, c.b);
+        const blue = 0.6 + Math.random() * 0.4
+        const c = new THREE.Color(0.2, 0.2, blue)
+        colors.push(c.r, c.g, c.b)
     }
 
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
 
     const material = new THREE.PointsMaterial({
         size: 1,
         vertexColors: true,
         transparent: true
-    });
+    })
 
-    const stars = new THREE.Points(geometry, material);
-    scene.add(stars);
+    const stars = new THREE.Points(geometry, material)
+    scene.add(stars)
 }
-createStarField();
+createStarField()
 
-
-const sizes = {
-    width: window.innerWidth,
-    height: window.innerHeight
-}
-
-window.addEventListener('resize', () =>
-{
+const sizes = { width: window.innerWidth, height: window.innerHeight }
+window.addEventListener('resize', () => {
     sizes.width = window.innerWidth
     sizes.height = window.innerHeight
-
     camera.aspect = sizes.width / sizes.height
     camera.updateProjectionMatrix()
-
     renderer.setSize(sizes.width, sizes.height)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 })
@@ -84,16 +75,13 @@ controls.minDistance = 2
 controls.maxDistance = 18
 
 // renderer
-const renderer = new THREE.WebGLRenderer({
-    canvas: canvas,
-    antialias: true
-})
+const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true })
 renderer.shadowMap.enabled = true
 renderer.shadowMap.type = THREE.PCFSoftShadowMap
 renderer.setSize(sizes.width, sizes.height)
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 
-// varibles globales
+// MOVIMIENTO y ANIMACIONES
 let model = null
 let mixer = null
 let walkAction = null
@@ -103,68 +91,167 @@ const speed = 2.2
 const rotationSpeed = 6
 const modelGroundOffset = 0.02
 const keys = { w: false, a: false, s: false, d: false }
+window.addEventListener("keydown", e => { if (e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = true })
+window.addEventListener("keyup", e => { if (e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = false })
 
-window.addEventListener("keydown", (e) => {
-    if (e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = true;
-})
-window.addEventListener("keyup", (e) => {
-    if (e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = false;
-})
-
-// Raycaster para detectar el muelle
+// Raycaster para suelo
 const downRay = new THREE.Raycaster()
-downRay.far = 20
+downRay.far = 40
 
-// Objetos sólidos del muelle
-const colliders = []
+// Mesh lists: groundMeshes para raycast Y, obstacleMeshes para colisiones laterales
+let groundMeshes = []
+let obstacleMeshes = []
 
-// cargar modelos
+// ================================
+// GLTF Loader (DRACO)
+// ================================
 const gltfLoader = new GLTFLoader()
-
-// Configuración de draco
 const dracoLoader = new DRACOLoader()
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/')
 gltfLoader.setDRACOLoader(dracoLoader)
 
-// escenario 1
-gltfLoader.load(
-    './models/muelle/sample.gltf',
-    function(gltf) {
-        const muelle = gltf.scene
-        muelle.traverse(obj => {
+// ================================
+// SISTEMA DE ESCENARIOS
+// ================================
+let currentSceneIndex = 0
+let loadedScene = null
+
+// nombres de archivos que dijiste
+const scenesList = [
+    { name: "muelle", file: "./models/muelle/sample.gltf" },
+    { name: "arbol",  file: "./models/casaarbol/casarbol.gltf" }
+]
+
+// limpia meshes y escena
+function clearCurrentScene() {
+    if (loadedScene) {
+        scene.remove(loadedScene)
+        loadedScene.traverse(obj => {
             if (obj.isMesh) {
+                try { if (obj.geometry) obj.geometry.dispose() } catch (e) {}
+                try {
+                    if (obj.material) {
+                        if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose && m.dispose())
+                        else obj.material.dispose && obj.material.dispose()
+                    }
+                } catch (e) {}
+            }
+        })
+        loadedScene = null
+    }
+    groundMeshes.length = 0
+    obstacleMeshes.length = 0
+}
+
+// Clasificación mejorada para evitar que ramas/raíces sean 'ground'
+function classifyMeshAsGroundOrObstacle(obj) {
+    if (!obj.isMesh || !obj.visible) return null
+
+    const name = (obj.name || "").toLowerCase()
+
+    // EXCLUSIONES por nombre (útiles para casarbol)
+    if (
+        name.includes("branch") ||
+        name.includes("rama") ||
+        name.includes("root") ||
+        name.includes("raiz") ||
+        name.includes("stick") ||
+        name.includes("plataforma") ||
+        name.includes("platform") ||
+        name.includes("wood") ||
+        name.includes("tronco") ||
+        name.includes("ladder") ||
+        name.includes("escalera") ||
+        name.includes("rail") ||
+        name.includes("baranda") ||
+        name.includes("branch") ||
+        name.includes("deco") ||
+        name.includes("leaf") ||
+        name.includes("hoja")
+    ) {
+        return "obstacle"
+    }
+
+    // Agua, fondos o meshes inútiles
+    if (name.includes("water") || name.includes("mar") || name.includes("ocean")) return null
+
+    // Bounding box world-aligned
+    const box = new THREE.Box3().setFromObject(obj)
+    const size = new THREE.Vector3()
+    box.getSize(size)
+
+    const height = size.y
+    const area = size.x * size.z
+    const thickness = Math.min(size.x, size.z)
+
+    // Heurística refinada:
+    // - plano grande y bajo => ground
+    // - objetos altos => obstacle
+    // - delgados/largos => obstacle (barandas/troncos)
+    if (height < 0.12 && area > 0.6) return "ground"
+    if (height >= 0.25) return "obstacle"
+    if (thickness < 0.05 && area > 0.12) return "obstacle"
+    if (area > 1.0 && height < 0.2) return "ground"
+
+    // fallback: preferir ground para permitir caminar
+    if (area > 0.03) return "ground"
+    return null
+}
+
+function loadScene(index) {
+    clearCurrentScene()
+    const info = scenesList[index]
+
+    gltfLoader.load(
+        info.file,
+        gltf => {
+            loadedScene = gltf.scene
+            loadedScene.updateWorldMatrix(true, true)
+
+            loadedScene.traverse(obj => {
+                if (!obj.isMesh) return
                 obj.castShadow = true
                 obj.receiveShadow = true
 
-                const name = (obj.name || "").toLowerCase()
-                const isWater = name.includes("water") || name.includes("mar") || name.includes("ocean")
+                const cls = classifyMeshAsGroundOrObstacle(obj)
+                if (cls === "ground") groundMeshes.push(obj)
+                else if (cls === "obstacle") obstacleMeshes.push(obj)
+            })
 
-                
-                if (!isWater) colliders.push(obj)
+            scene.add(loadedScene)
+
+            // reajustar Y del personaje si ya está cargado
+            if (model) {
+                const gy = getGroundYAtPosition(model.position)
+                if (gy !== null) model.position.y = gy + modelGroundOffset
             }
-        })
-        scene.add(muelle)
-    },
-    undefined,
-    function(err) { console.error('Error cargando muelle:', err) }
-)
 
-// Personaje xiao
+            console.log("Escenario cargado:", info.name, " ground:", groundMeshes.length, " obstacles:", obstacleMeshes.length)
+        },
+        undefined,
+        err => {
+            console.error("Error cargando escenario:", err)
+        }
+    )
+}
+
+// cargar escena inicial
+loadScene(currentSceneIndex)
+
+// ================================
+// Cargar personaje (xiaowalk.gltf)
+// ================================
 gltfLoader.load(
     './models/xiaowalk.gltf',
-    function(gltf) {
-
+    gltf => {
         model = gltf.scene
         model.scale.set(0.30, 0.30, 0.30)
         model.position.set(-3, 0.5, -2)
 
-        model.traverse(child => {
-            if (child.isMesh) child.castShadow = true
-        })
+        model.traverse(child => { if (child.isMesh) child.castShadow = true })
         scene.add(model)
 
         mixer = new THREE.AnimationMixer(model)
-
         walkAction = mixer.clipAction(gltf.animations[0])
 
         let idleClip
@@ -175,29 +262,40 @@ gltfLoader.load(
         idleAction.play()
     },
     undefined,
-    function(err) { console.error('Error cargando modelo:', err) }
+    err => console.error('Error cargando modelo:', err)
 )
 
-// altura del muelle
+// ================================
+// funciones de suelo / colisión
+// ================================
 function getGroundYAtPosition(pos) {
-    const origin = new THREE.Vector3(pos.x, 10, pos.z)
+    // ray desde arriba
+    const origin = new THREE.Vector3(pos.x, 20, pos.z)
     downRay.set(origin, new THREE.Vector3(0, -1, 0))
 
-    const hits = downRay.intersectObjects(colliders, true)
-    if (hits.length > 0) return hits[0].point.y
-    return null
+    // Usar groundMeshes si hay, si no usar loadedScene para fallback
+    const targets = groundMeshes.length > 0 ? groundMeshes : (loadedScene ? [loadedScene] : scene.children)
+    const hits = downRay.intersectObjects(targets, true)
+    if (hits.length === 0) return null
+
+    // Elegir el HIT más alto (mayor Y) entre los resultados: evita que pequeñas geometrías por debajo nos confundan.
+    let best = hits[0]
+    for (let h of hits) {
+        if (h.point.y > best.point.y) best = h
+    }
+    return best.point.y
 }
 
-// detectar colisión lateral
 function detectHorizontalCollision(newPos) {
+    // caja del personaje en la nueva posición
     const boxSize = new THREE.Vector3(0.45, 1.0, 0.45)
-
     const tempBox = new THREE.Box3().setFromCenterAndSize(
         new THREE.Vector3(newPos.x, newPos.y + 0.5, newPos.z),
         boxSize
     )
 
-    for (let o of colliders) {
+    // comprobar solo contra obstacleMeshes (no contra suelo)
+    for (let o of obstacleMeshes) {
         const box = new THREE.Box3().setFromObject(o)
         if (tempBox.intersectsBox(box)) return true
     }
@@ -212,19 +310,18 @@ function updateCameraFollow() {
     controls.target.lerp(target, 0.12)
 }
 
-/**
- * Animate
- */
+// ================================
+// loop
+// ================================
 const clock = new THREE.Clock()
 let initialGroundSet = false
 
 function tick() {
     const dt = clock.getDelta()
-
     if (mixer) mixer.update(dt)
 
     if (model) {
-        if (!initialGroundSet && colliders.length > 0) {
+        if (!initialGroundSet && (groundMeshes.length > 0 || obstacleMeshes.length > 0)) {
             const gy = getGroundYAtPosition(model.position)
             if (gy !== null) {
                 model.position.y = gy + modelGroundOffset
@@ -241,15 +338,15 @@ function tick() {
         const isMoving = input.length() > 0
 
         if (isMoving) {
-            idleAction.stop()
-            walkAction.play()
+            if (idleAction) idleAction.stop()
+            if (walkAction) walkAction.play()
         } else {
-            walkAction.stop()
-            idleAction.play()
+            if (walkAction) walkAction.stop()
+            if (idleAction) idleAction.play()
         }
 
         if (isMoving) {
-            // Dirección relativa a cámara
+            // movimiento relativo a cámara
             const camDir = new THREE.Vector3()
             camera.getWorldDirection(camDir)
             camDir.y = 0
@@ -266,26 +363,37 @@ function tick() {
             const step = moveDir.clone().multiplyScalar(speed * dt)
             const nextPos = model.position.clone().add(step)
 
-            // Averiguar la Y del suelo en nextPos
             const nextY = getGroundYAtPosition(nextPos)
-
             if (nextY !== null) {
                 const next = nextPos.clone()
                 next.y = nextY + modelGroundOffset
 
-                // Detectar colisión lateral sin que el suelo misma bloquee
                 if (!detectHorizontalCollision(next)) {
                     model.position.copy(next)
+                } else {
+                    // Intento a lo ancho: permitir pequeño deslizamiento paralelo si bloqueado frontalmente
+                    const tryX = model.position.clone().add(new THREE.Vector3(step.x, 0, 0))
+                    const tryXZ = tryX.clone()
+                    const ty1 = getGroundYAtPosition(tryX)
+                    if (ty1 !== null) tryXZ.y = ty1 + modelGroundOffset
+                    if (!detectHorizontalCollision(tryXZ)) model.position.copy(tryXZ)
+                    else {
+                        const tryZ = model.position.clone().add(new THREE.Vector3(0, 0, step.z))
+                        const tryZZ = tryZ.clone()
+                        const ty2 = getGroundYAtPosition(tryZ)
+                        if (ty2 !== null) tryZZ.y = ty2 + modelGroundOffset
+                        if (!detectHorizontalCollision(tryZZ)) model.position.copy(tryZZ)
+                    }
                 }
 
-                // Rotación hacia dirección de movimiento
+                // rotación hacia movimiento
                 const targetRot = new THREE.Quaternion()
                 targetRot.setFromUnitVectors(new THREE.Vector3(0, 0, 1), moveDir)
                 model.quaternion.slerp(targetRot, rotationSpeed * dt)
             }
         }
 
-        // Mantener pies en el muelle 
+        // mantener pies en el suelo
         const gy = getGroundYAtPosition(model.position)
         if (gy !== null) model.position.y = gy + modelGroundOffset
 
@@ -296,5 +404,22 @@ function tick() {
     renderer.render(scene, camera)
     requestAnimationFrame(tick)
 }
-
 tick()
+
+// ================================
+// FLECHAS ESCENARIOS (HTML debe tener .left-arrow y .right-arrow)
+// ================================
+const leftEl = document.querySelector('.left-arrow')
+const rightEl = document.querySelector('.right-arrow')
+
+if (!leftEl && !rightEl) {
+    console.warn("No se encontraron elementos .left-arrow ni .right-arrow en el DOM.")
+}
+if (leftEl) leftEl.addEventListener('click', () => {
+    currentSceneIndex = (currentSceneIndex - 1 + scenesList.length) % scenesList.length
+    loadScene(currentSceneIndex)
+})
+if (rightEl) rightEl.addEventListener('click', () => {
+    currentSceneIndex = (currentSceneIndex + 1) % scenesList.length
+    loadScene(currentSceneIndex)
+})

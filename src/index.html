@@ -8,6 +8,30 @@
 </head>
 <body>
     <canvas class="webgl"></canvas>
+    <div class="scene-arrow left-arrow">⭠</div>
+<div class="scene-arrow right-arrow">⭢</div>
+
+<style>
+.scene-arrow {
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 4rem;
+    color: white;
+    cursor: pointer;
+    user-select: none;
+    z-index: 999999;
+    opacity: 0.5;
+    transition: 0.2s;
+}
+.scene-arrow:hover {
+    opacity: 1;
+}
+
+.left-arrow { left: 20px; }
+.right-arrow { right: 20px; }
+</style>
+
     <script type="module" src="./script.js"></script>
 </body>
 </html>
