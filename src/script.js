@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import GUI from 'lil-gui'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 
 
 const gui = new GUI()
@@ -9,13 +10,7 @@ const canvas = document.querySelector('canvas.webgl')
 const scene = new THREE.Scene()
 
 
-const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(10, 10),
-    new THREE.MeshStandardMaterial({ color: '#444444', metalness: 0, roughness: 0.5 })
-)
-floor.receiveShadow = true
-floor.rotation.x = -Math.PI * 0.5
-scene.add(floor)
+
 
 // luces
 const ambientLight = new THREE.AmbientLight(0xffffff, 2.4)
@@ -79,9 +74,18 @@ window.addEventListener("keyup", e => {
 })
 
 const gltfLoader = new GLTFLoader()
+// Helper to (re)attach a DRACOLoader instance to the GLTFLoader.
+function attachDraco() {
+    const dl = new DRACOLoader()
+    dl.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/')
+    gltfLoader.setDRACOLoader(dl)
+}
+
+// Attach once at startup.
+attachDraco()
 
 // Escenario
-gltfLoader.load('/models/sample.gltf', gltf => {
+gltfLoader.load('/models/muelle/sample.gltf', gltf => {
     scene.add(gltf.scene)
 })
 
