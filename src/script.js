@@ -98,13 +98,10 @@ window.addEventListener("keyup", e => { if (e.key.toLowerCase() in keys) keys[e.
 const downRay = new THREE.Raycaster()
 downRay.far = 40
 
-// Mesh lists: groundMeshes para raycast Y, obstacleMeshes para colisiones laterales
 let groundMeshes = []
 let obstacleMeshes = []
 
-// ================================
-// GLTF Loader (DRACO)
-// ================================
+// GLTF Loader
 const gltfLoader = new GLTFLoader()
 const dracoLoader = new DRACOLoader()
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/')
@@ -116,10 +113,12 @@ gltfLoader.setDRACOLoader(dracoLoader)
 let currentSceneIndex = 0
 let loadedScene = null
 
-// nombres de archivos que dijiste
+// 🔥 YA INCLUYE castillo y templo 🔥
 const scenesList = [
-    { name: "muelle", file: "./models/muelle/sample.gltf" },
-    { name: "arbol",  file: "./models/casaarbol/casarbol.gltf" }
+    { name: "muelle",   file: "./models/muelle/sample.gltf" },
+    { name: "arbol",    file: "./models/casaarbol/casarbol.gltf" },
+    { name: "castillo", file: "./models/castillo/castillo.gltf" },
+    { name: "templo",   file: "./models/templo/templo.gltf" }
 ]
 
 // limpia meshes y escena
@@ -143,13 +142,11 @@ function clearCurrentScene() {
     obstacleMeshes.length = 0
 }
 
-// Clasificación mejorada para evitar que ramas/raíces sean 'ground'
 function classifyMeshAsGroundOrObstacle(obj) {
     if (!obj.isMesh || !obj.visible) return null
 
     const name = (obj.name || "").toLowerCase()
 
-    // EXCLUSIONES por nombre (útiles para casarbol)
     if (
         name.includes("branch") ||
         name.includes("rama") ||
@@ -164,18 +161,13 @@ function classifyMeshAsGroundOrObstacle(obj) {
         name.includes("escalera") ||
         name.includes("rail") ||
         name.includes("baranda") ||
-        name.includes("branch") ||
         name.includes("deco") ||
         name.includes("leaf") ||
         name.includes("hoja")
-    ) {
-        return "obstacle"
-    }
+    ) { return "obstacle" }
 
-    // Agua, fondos o meshes inútiles
     if (name.includes("water") || name.includes("mar") || name.includes("ocean")) return null
 
-    // Bounding box world-aligned
     const box = new THREE.Box3().setFromObject(obj)
     const size = new THREE.Vector3()
     box.getSize(size)
@@ -184,22 +176,17 @@ function classifyMeshAsGroundOrObstacle(obj) {
     const area = size.x * size.z
     const thickness = Math.min(size.x, size.z)
 
-    // Heurística refinada:
-    // - plano grande y bajo => ground
-    // - objetos altos => obstacle
-    // - delgados/largos => obstacle (barandas/troncos)
     if (height < 0.12 && area > 0.6) return "ground"
     if (height >= 0.25) return "obstacle"
     if (thickness < 0.05 && area > 0.12) return "obstacle"
     if (area > 1.0 && height < 0.2) return "ground"
-
-    // fallback: preferir ground para permitir caminar
     if (area > 0.03) return "ground"
     return null
 }
 
 function loadScene(index) {
     clearCurrentScene()
+
     const info = scenesList[index]
 
     gltfLoader.load(
@@ -220,27 +207,22 @@ function loadScene(index) {
 
             scene.add(loadedScene)
 
-            // reajustar Y del personaje si ya está cargado
             if (model) {
                 const gy = getGroundYAtPosition(model.position)
                 if (gy !== null) model.position.y = gy + modelGroundOffset
             }
 
-            console.log("Escenario cargado:", info.name, " ground:", groundMeshes.length, " obstacles:", obstacleMeshes.length)
+            console.log("Escenario cargado:", info.name)
         },
         undefined,
-        err => {
-            console.error("Error cargando escenario:", err)
-        }
+        err => console.error("Error cargando escenario:", err)
     )
 }
 
 // cargar escena inicial
 loadScene(currentSceneIndex)
 
-// ================================
-// Cargar personaje (xiaowalk.gltf)
-// ================================
+// PERSONAJE
 gltfLoader.load(
     './models/xiaowalk.gltf',
     gltf => {
@@ -265,20 +247,15 @@ gltfLoader.load(
     err => console.error('Error cargando modelo:', err)
 )
 
-// ================================
-// funciones de suelo / colisión
-// ================================
+// SUELO / COLISIONES
 function getGroundYAtPosition(pos) {
-    // ray desde arriba
     const origin = new THREE.Vector3(pos.x, 20, pos.z)
     downRay.set(origin, new THREE.Vector3(0, -1, 0))
 
-    // Usar groundMeshes si hay, si no usar loadedScene para fallback
     const targets = groundMeshes.length > 0 ? groundMeshes : (loadedScene ? [loadedScene] : scene.children)
     const hits = downRay.intersectObjects(targets, true)
     if (hits.length === 0) return null
 
-    // Elegir el HIT más alto (mayor Y) entre los resultados: evita que pequeñas geometrías por debajo nos confundan.
     let best = hits[0]
     for (let h of hits) {
         if (h.point.y > best.point.y) best = h
@@ -287,14 +264,12 @@ function getGroundYAtPosition(pos) {
 }
 
 function detectHorizontalCollision(newPos) {
-    // caja del personaje en la nueva posición
     const boxSize = new THREE.Vector3(0.45, 1.0, 0.45)
     const tempBox = new THREE.Box3().setFromCenterAndSize(
         new THREE.Vector3(newPos.x, newPos.y + 0.5, newPos.z),
         boxSize
     )
 
-    // comprobar solo contra obstacleMeshes (no contra suelo)
     for (let o of obstacleMeshes) {
         const box = new THREE.Box3().setFromObject(o)
         if (tempBox.intersectsBox(box)) return true
@@ -302,7 +277,6 @@ function detectHorizontalCollision(newPos) {
     return false
 }
 
-// cámara sigue al personaje
 function updateCameraFollow() {
     if (!model) return
     const target = model.position.clone()
@@ -310,9 +284,7 @@ function updateCameraFollow() {
     controls.target.lerp(target, 0.12)
 }
 
-// ================================
-// loop
-// ================================
+// LOOP
 const clock = new THREE.Clock()
 let initialGroundSet = false
 
@@ -346,7 +318,6 @@ function tick() {
         }
 
         if (isMoving) {
-            // movimiento relativo a cámara
             const camDir = new THREE.Vector3()
             camera.getWorldDirection(camDir)
             camDir.y = 0
@@ -371,7 +342,6 @@ function tick() {
                 if (!detectHorizontalCollision(next)) {
                     model.position.copy(next)
                 } else {
-                    // Intento a lo ancho: permitir pequeño deslizamiento paralelo si bloqueado frontalmente
                     const tryX = model.position.clone().add(new THREE.Vector3(step.x, 0, 0))
                     const tryXZ = tryX.clone()
                     const ty1 = getGroundYAtPosition(tryX)
@@ -386,14 +356,12 @@ function tick() {
                     }
                 }
 
-                // rotación hacia movimiento
                 const targetRot = new THREE.Quaternion()
                 targetRot.setFromUnitVectors(new THREE.Vector3(0, 0, 1), moveDir)
                 model.quaternion.slerp(targetRot, rotationSpeed * dt)
             }
         }
 
-        // mantener pies en el suelo
         const gy = getGroundYAtPosition(model.position)
         if (gy !== null) model.position.y = gy + modelGroundOffset
 
@@ -406,9 +374,7 @@ function tick() {
 }
 tick()
 
-// ================================
-// FLECHAS ESCENARIOS (HTML debe tener .left-arrow y .right-arrow)
-// ================================
+// FLECHAS ESCENARIOS
 const leftEl = document.querySelector('.left-arrow')
 const rightEl = document.querySelector('.right-arrow')
 
