@@ -107,13 +107,12 @@ const dracoLoader = new DRACOLoader()
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/')
 gltfLoader.setDRACOLoader(dracoLoader)
 
-// ================================
-// SISTEMA DE ESCENARIOS
-// ================================
+// sistema de escenarios
 let currentSceneIndex = 0
 let loadedScene = null
 
-// 🔥 YA INCLUYE castillo y templo 🔥
+// 4 escenarios
+
 const scenesList = [
     { name: "muelle",   file: "./models/muelle/sample.gltf" },
     { name: "arbol",    file: "./models/casaarbol/casarbol.gltf" },
@@ -121,7 +120,7 @@ const scenesList = [
     { name: "templo",   file: "./models/templo/templo.gltf" }
 ]
 
-// limpia meshes y escena
+// meshes y escena
 function clearCurrentScene() {
     if (loadedScene) {
         scene.remove(loadedScene)
@@ -247,7 +246,7 @@ gltfLoader.load(
     err => console.error('Error cargando modelo:', err)
 )
 
-// SUELO / COLISIONES
+// colisiones
 function getGroundYAtPosition(pos) {
     const origin = new THREE.Vector3(pos.x, 20, pos.z)
     downRay.set(origin, new THREE.Vector3(0, -1, 0))
@@ -284,7 +283,7 @@ function updateCameraFollow() {
     controls.target.lerp(target, 0.12)
 }
 
-// LOOP
+// loop
 const clock = new THREE.Clock()
 let initialGroundSet = false
 
@@ -374,7 +373,7 @@ function tick() {
 }
 tick()
 
-// FLECHAS ESCENARIOS
+// flechas para el cambio de escenarios
 const leftEl = document.querySelector('.left-arrow')
 const rightEl = document.querySelector('.right-arrow')
 
