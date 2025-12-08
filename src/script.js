@@ -95,6 +95,9 @@ const keys = { w: false, a: false, s: false, d: false }
 window.addEventListener("keydown", e => { if (e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = true })
 window.addEventListener("keyup", e => { if (e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = false })
 
+// Scene loading state
+let isSceneLoading = false
+
 // Raycaster para suelo
 const downRay = new THREE.Raycaster()
 downRay.far = 40
@@ -112,8 +115,7 @@ gltfLoader.setDRACOLoader(dracoLoader)
 let currentSceneIndex = 0
 let loadedScene = null
 
-// 3 escenarios (se eliminó temporalmente el cuarto a petición del usuario)
-
+// 3 escenarios 
 const scenesList = [
     { name: "muelle",   file: "./models/muelle/sample.gltf" },
     { name: "arbol",    file: "./models/casaarbol/casarbol.gltf" },
@@ -380,6 +382,15 @@ function findLargestGroundMesh() {
 
 function loadScene(index) {
     clearCurrentScene()
+    
+    // Mark scene as loading - disable arrows
+    isSceneLoading = true
+    const leftEl = document.querySelector('.left-arrow')
+    const rightEl = document.querySelector('.right-arrow')
+    if (leftEl) leftEl.style.opacity = '0.2'
+    if (rightEl) rightEl.style.opacity = '0.2'
+    if (leftEl) leftEl.style.pointerEvents = 'none'
+    if (rightEl) rightEl.style.pointerEvents = 'none'
 
     const info = scenesList[index]
 
@@ -418,17 +429,17 @@ function loadScene(index) {
                 const largest = findLargestGroundMesh()
                 const sceneOffset = sceneGroundYOffset[index] || 0
                 if (largest) {
-                    // attempt to find a safe spawn position (not intersecting obstacles)
+                    
                     const safe = findSafeSpawnPositionOnMesh(largest, index)
                     if (safe) {
                         model.position.x = safe.x
                         model.position.z = safe.z
-                        // set approximate Y before final alignment, then align precisely
+                       
                         model.position.y = safe.y
                         console.log('Moved model to safe spawn:', safe.x, safe.y, safe.z)
                         placeModelOnGroundY(safe.y)
                         console.log('Placed model on largest ground top (safe):', safe.y)
-                        // if still inside obstacle, try to unstick by nudging outward
+                       
                         if (isPositionInsideObstacle(model.position)) {
                             console.log('Model is still inside obstacle, attempting unstick...')
                             const unst = unstickModel()
@@ -436,7 +447,7 @@ function loadScene(index) {
                         }
                     } else {
                         const bb = largest.bbox
-                        // fallback: if model is not already inside that bbox, move it to center XZ
+                        // el centro del ground más grande
                         const insideXZ = model.position.x >= bb.min.x && model.position.x <= bb.max.x && model.position.z >= bb.min.z && model.position.z <= bb.max.z
                         if (!insideXZ) {
                             model.position.x = (bb.min.x + bb.max.x) / 2
@@ -444,13 +455,13 @@ function loadScene(index) {
                             console.log('Moved model XZ to largest ground center (fallback):', model.position.x, model.position.z)
                         }
 
-                        // place model on top of that largest ground with scene-specific offset
+                        // lugar el Y
                         const proposed = largest.topY + modelGroundOffset + sceneOffset
                         placeModelOnGroundY(proposed)
                         console.log('Placed model on largest ground top (fallback):', proposed)
                     }
                 } else {
-                    // fallback: use local ground-top heuristic / raycast
+                
                     const topY = findGroundTopUnderPosition(model.position)
                     const sceneOffset2 = sceneGroundYOffset[index] || 0
                     if (topY !== null && Number.isFinite(topY)) {
@@ -477,9 +488,26 @@ function loadScene(index) {
                     console.warn('Failed to recenter camera:', e)
                 }
             }
+            
+            isSceneLoading = false
+            const leftEl = document.querySelector('.left-arrow')
+            const rightEl = document.querySelector('.right-arrow')
+            if (leftEl) leftEl.style.opacity = '0.5'
+            if (rightEl) rightEl.style.opacity = '0.5'
+            if (leftEl) leftEl.style.pointerEvents = 'auto'
+            if (rightEl) rightEl.style.pointerEvents = 'auto'
         },
         undefined,
-        err => console.error("Error cargando escenario:", err)
+        err => {
+            console.error("Error cargando escenario:", err)
+            isSceneLoading = false
+            const leftEl = document.querySelector('.left-arrow')
+            const rightEl = document.querySelector('.right-arrow')
+            if (leftEl) leftEl.style.opacity = '0.5'
+            if (rightEl) rightEl.style.opacity = '0.5'
+            if (leftEl) leftEl.style.pointerEvents = 'auto'
+            if (rightEl) rightEl.style.pointerEvents = 'auto'
+        }
     )
 }
 
@@ -698,15 +726,23 @@ if (!leftEl && !rightEl) {
     console.warn("No se encontraron elementos .left-arrow ni .right-arrow en el DOM.")
 }
 if (leftEl) leftEl.addEventListener('click', () => {
+    if (isSceneLoading) {
+        console.log('Scene is still loading, please wait...')
+        return
+    }
     currentSceneIndex = (currentSceneIndex - 1 + scenesList.length) % scenesList.length
     loadScene(currentSceneIndex)
 })
 if (rightEl) rightEl.addEventListener('click', () => {
+    if (isSceneLoading) {
+        console.log('Scene is still loading, please wait...')
+        return
+    }
     currentSceneIndex = (currentSceneIndex + 1) % scenesList.length
     loadScene(currentSceneIndex)
 })
 
-// Instructions modal
+
 const instructionsModal = document.getElementById('instructionsModal')
 const closeInstructionsBtn = document.getElementById('closeInstructions')
 
@@ -716,7 +752,7 @@ if (closeInstructionsBtn) {
     })
 }
 
-// Optional: close modal when clicking outside the content area
+
 if (instructionsModal) {
     instructionsModal.addEventListener('click', (e) => {
         if (e.target === instructionsModal) {
