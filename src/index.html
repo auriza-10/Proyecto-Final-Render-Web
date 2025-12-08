@@ -9,7 +9,20 @@
 <body>
     <canvas class="webgl"></canvas>
     <div class="scene-arrow left-arrow">⭠</div>
-<div class="scene-arrow right-arrow">⭢</div>
+    <div class="scene-arrow right-arrow">⭢</div>
+
+    <!-- Instructions Modal -->
+    <div class="instructions-modal" id="instructionsModal">
+        <div class="instructions-content">
+            <button class="close-btn" id="closeInstructions">&times;</button>
+            <h1>EXPLORING LIYUE</h1>
+            <div class="instructions-list">
+                <p><strong>🖱️ Click:</strong> La cámara es libre para explorar</p>
+                <p><strong>⌨️ W, A, S, D:</strong> Haz que el personaje camine</p>
+                <p><strong>⬅️ ➡️ Flechas:</strong> Cambia de escenario</p>
+            </div>
+        </div>
+    </div>
 
 <style>
 .scene-arrow {

@@ -39,6 +39,7 @@ function createStarField() {
         colors.push(c.r, c.g, c.b)
     }
 
+
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
 
@@ -81,7 +82,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap
 renderer.setSize(sizes.width, sizes.height)
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 
-// MOVIMIENTO y ANIMACIONES
+// Movimiento y animaciones
 let model = null
 let mixer = null
 let walkAction = null
@@ -111,13 +112,12 @@ gltfLoader.setDRACOLoader(dracoLoader)
 let currentSceneIndex = 0
 let loadedScene = null
 
-// 4 escenarios
+// 3 escenarios (se eliminó temporalmente el cuarto a petición del usuario)
 
 const scenesList = [
     { name: "muelle",   file: "./models/muelle/sample.gltf" },
     { name: "arbol",    file: "./models/casaarbol/casarbol.gltf" },
-    { name: "castillo", file: "./models/castillo/castillo.gltf" },
-    { name: "templo",   file: "./models/templo/templo.gltf" }
+    { name: "castillo", file: "./models/castillo/castillo.gltf" }
 ]
 
 // meshes y escena
@@ -183,6 +183,201 @@ function classifyMeshAsGroundOrObstacle(obj) {
     return null
 }
 
+function findGroundTopUnderPosition(pos) {
+    
+    let best = null
+    for (let m of groundMeshes) {
+        try {
+            const b = new THREE.Box3().setFromObject(m)
+            const pad = 0.2
+            const minX = b.min.x - pad, maxX = b.max.x + pad
+            const minZ = b.min.z - pad, maxZ = b.max.z + pad
+            if (pos.x >= minX && pos.x <= maxX && pos.z >= minZ && pos.z <= maxZ) {
+                const area = (b.max.x - b.min.x) * (b.max.z - b.min.z)
+                const topY = b.max.y
+                if (!best || area > best.area) best = { area, topY, mesh: m }
+            }
+        } catch (e) {
+
+        }
+    }
+    if (!best) return null
+
+    const thresholdAbove = (pos.y || 0) + 1.0
+    const belowCandidates = []
+    for (let m of groundMeshes) {
+        try {
+            const b = new THREE.Box3().setFromObject(m)
+            const pad = 0.2
+            const minX = b.min.x - pad, maxX = b.max.x + pad
+            const minZ = b.min.z - pad, maxZ = b.max.z + pad
+            if (pos.x >= minX && pos.x <= maxX && pos.z >= minZ && pos.z <= maxZ) {
+                const area = (b.max.x - b.min.x) * (b.max.z - b.min.z)
+                const topY = b.max.y
+                if (topY <= thresholdAbove) belowCandidates.push({ area, topY, mesh: m })
+            }
+        } catch (e) {}
+    }
+
+    if (belowCandidates.length > 0) {
+       
+        let pick = belowCandidates[0]
+        for (let c of belowCandidates) if (c.topY > pick.topY) pick = c
+        return pick.topY
+    }
+
+   
+    return best ? best.topY : null
+}
+
+
+const sceneGroundYOffset = {
+    2: -2.0, 
+    3: -0.4  
+}
+
+function isPositionInsideObstacle(testPos) {
+    if (!model) return false
+    try {
+       
+        const modelBox = new THREE.Box3().setFromObject(model)
+        const delta = new THREE.Vector3().subVectors(testPos, model.position)
+        const testBox = modelBox.clone()
+        testBox.min.add(delta)
+        testBox.max.add(delta)
+
+        for (let obs of obstacleMeshes) {
+            try {
+                const obsBox = new THREE.Box3().setFromObject(obs)
+                if (testBox.intersectsBox(obsBox)) return true
+            } catch (e) {}
+        }
+    } catch (e) {
+    }
+    return false
+}
+
+function findSafeSpawnPositionOnMesh(largest, sceneIndex) {
+    if (!largest || !model) return null
+    const bb = largest.bbox
+    const centerX = (bb.min.x + bb.max.x) / 2
+    const centerZ = (bb.min.z + bb.max.z) / 2
+
+    
+    const sceneOffset = sceneGroundYOffset[sceneIndex] || 0
+    const pad = 0.1
+
+    const width = Math.max(0.5, bb.max.x - bb.min.x - 2 * pad)
+    const depth = Math.max(0.5, bb.max.z - bb.min.z - 2 * pad)
+    const grid = 9 
+    const stepX = width / Math.max(1, grid - 1)
+    const stepZ = depth / Math.max(1, grid - 1)
+
+   
+    const candidates = []
+    for (let ix = 0; ix < grid; ix++) {
+        for (let iz = 0; iz < grid; iz++) {
+            const tx = bb.min.x + pad + ix * stepX
+            const tz = bb.min.z + pad + iz * stepZ
+            const probePos = new THREE.Vector3(tx, 0, tz)
+
+        
+            let topY = findGroundTopUnderPosition(probePos)
+            if (topY === null) topY = getGroundYAtPosition(probePos)
+            if (topY === null) continue
+
+            const candidate = new THREE.Vector3(tx, topY + modelGroundOffset + sceneOffset, tz)
+
+            if (tx < bb.min.x - pad || tx > bb.max.x + pad || tz < bb.min.z - pad || tz > bb.max.z + pad) continue
+
+        
+            if (!isPositionInsideObstacle(candidate)) {
+                const distFromCenter = Math.sqrt((tx - centerX) ** 2 + (tz - centerZ) ** 2)
+                candidates.push({ pos: candidate, dist: distFromCenter })
+            }
+        }
+    }
+
+    if (candidates.length > 0) {
+        candidates.sort((a, b) => b.dist - a.dist)
+        return candidates[0].pos
+    }
+
+    return new THREE.Vector3(centerX, largest.topY + modelGroundOffset + sceneOffset, centerZ)
+}
+
+function unstickModel(maxAttempts = 20, baseStep = 0.3) {
+    if (!model) return false
+    if (!isPositionInsideObstacle(model.position)) return false
+
+    
+    const dirs = [
+        new THREE.Vector3(1, 0, 0),
+        new THREE.Vector3(-1, 0, 0),
+        new THREE.Vector3(0, 0, 1),
+        new THREE.Vector3(0, 0, -1),
+        new THREE.Vector3(1, 0, 1).normalize(),
+        new THREE.Vector3(-1, 0, 1).normalize(),
+        new THREE.Vector3(1, 0, -1).normalize(),
+        new THREE.Vector3(-1, 0, -1).normalize()
+    ]
+
+    for (let i = 1; i <= maxAttempts; i++) {
+        const dist = baseStep * i
+        for (let d of dirs) {
+            const cand = model.position.clone().add(d.clone().multiplyScalar(dist))
+            const gy = findGroundTopUnderPosition(cand) || getGroundYAtPosition(cand)
+            if (gy === null) continue
+            cand.y = gy + modelGroundOffset + (sceneGroundYOffset[currentSceneIndex] || 0)
+            if (!isPositionInsideObstacle(cand)) {
+                model.position.copy(cand)
+                console.log('unstickModel: moved model by', d, 'dist', dist, 'to', cand)
+                return true
+            }
+        }
+    }
+    return false
+}
+
+function placeModelOnGroundY(targetY) {
+    
+    if (!model) return false
+    try {
+        const bbox = new THREE.Box3().setFromObject(model)
+        if (bbox && isFinite(bbox.min.y)) {
+            const beforeMin = bbox.min.y
+            const beforeMax = bbox.max.y
+            const delta = targetY - bbox.min.y
+            model.position.y += delta
+            try {
+                const nb = new THREE.Box3().setFromObject(model)
+                console.log('placeModelOnGroundY: adjusted by', delta, 'beforeMin', beforeMin, 'beforeMax', beforeMax, 'afterMin', nb.min.y, 'afterPosY', model.position.y)
+            } catch (e) {
+                console.log('placeModelOnGroundY: adjusted by', delta, 'new model.position.y', model.position.y)
+            }
+            return true
+        }
+    } catch (e) {
+        console.warn('placeModelOnGroundY failed:', e)
+    }
+    model.position.y = targetY
+    return false
+}
+
+function findLargestGroundMesh() {
+    let best = null
+    for (let m of groundMeshes) {
+        try {
+            const b = new THREE.Box3().setFromObject(m)
+            const area = (b.max.x - b.min.x) * (b.max.z - b.min.z)
+            if (!best || area > best.area) best = { mesh: m, bbox: b, area, topY: b.max.y }
+        } catch (e) {
+           
+        }
+    }
+    return best
+}
+
 function loadScene(index) {
     clearCurrentScene()
 
@@ -206,22 +401,91 @@ function loadScene(index) {
 
             scene.add(loadedScene)
 
+            
+            console.log(
+                "Escenario cargado:",
+                info.name,
+                "groundMeshes:",
+                groundMeshes.length,
+                "obstacleMeshes:",
+                obstacleMeshes.length,
+                "modelPos:",
+                model ? model.position.clone() : null
+            )
+
             if (model) {
-                const gy = getGroundYAtPosition(model.position)
-                if (gy !== null) model.position.y = gy + modelGroundOffset
+                
+                const largest = findLargestGroundMesh()
+                const sceneOffset = sceneGroundYOffset[index] || 0
+                if (largest) {
+                    // attempt to find a safe spawn position (not intersecting obstacles)
+                    const safe = findSafeSpawnPositionOnMesh(largest, index)
+                    if (safe) {
+                        model.position.x = safe.x
+                        model.position.z = safe.z
+                        // set approximate Y before final alignment, then align precisely
+                        model.position.y = safe.y
+                        console.log('Moved model to safe spawn:', safe.x, safe.y, safe.z)
+                        placeModelOnGroundY(safe.y)
+                        console.log('Placed model on largest ground top (safe):', safe.y)
+                        // if still inside obstacle, try to unstick by nudging outward
+                        if (isPositionInsideObstacle(model.position)) {
+                            console.log('Model is still inside obstacle, attempting unstick...')
+                            const unst = unstickModel()
+                            console.log('unstickModel result:', unst)
+                        }
+                    } else {
+                        const bb = largest.bbox
+                        // fallback: if model is not already inside that bbox, move it to center XZ
+                        const insideXZ = model.position.x >= bb.min.x && model.position.x <= bb.max.x && model.position.z >= bb.min.z && model.position.z <= bb.max.z
+                        if (!insideXZ) {
+                            model.position.x = (bb.min.x + bb.max.x) / 2
+                            model.position.z = (bb.min.z + bb.max.z) / 2
+                            console.log('Moved model XZ to largest ground center (fallback):', model.position.x, model.position.z)
+                        }
+
+                        // place model on top of that largest ground with scene-specific offset
+                        const proposed = largest.topY + modelGroundOffset + sceneOffset
+                        placeModelOnGroundY(proposed)
+                        console.log('Placed model on largest ground top (fallback):', proposed)
+                    }
+                } else {
+                    // fallback: use local ground-top heuristic / raycast
+                    const topY = findGroundTopUnderPosition(model.position)
+                    const sceneOffset2 = sceneGroundYOffset[index] || 0
+                    if (topY !== null && Number.isFinite(topY)) {
+                        const proposed = topY + modelGroundOffset + sceneOffset2
+                        placeModelOnGroundY(proposed)
+                        console.log('Placed model on ground top under position:', proposed)
+                    } else {
+                        const gy = getGroundYAtPosition(model.position)
+                        if (gy !== null) placeModelOnGroundY(gy + modelGroundOffset + sceneOffset2)
+                    }
+                }
             }
 
             console.log("Escenario cargado:", info.name)
+            
+    
+            if (model) {
+                try {
+                    const camTarget = model.position.clone()
+                    controls.target.copy(camTarget)
+                    camera.position.copy(camTarget.clone().add(new THREE.Vector3(0, 2.5, 5)))
+                    controls.update()
+                } catch (e) {
+                    console.warn('Failed to recenter camera:', e)
+                }
+            }
         },
         undefined,
         err => console.error("Error cargando escenario:", err)
     )
 }
 
-// cargar escena inicial
 loadScene(currentSceneIndex)
 
-// PERSONAJE
+
 gltfLoader.load(
     './models/xiaowalk.gltf',
     gltf => {
@@ -232,6 +496,18 @@ gltfLoader.load(
         model.traverse(child => { if (child.isMesh) child.castShadow = true })
         scene.add(model)
 
+        
+        model.visible = true
+        model.traverse(c => { if (c.isMesh) c.visible = true })
+
+       
+        try {
+            const camTarget = model.position.clone()
+            controls.target.copy(camTarget)
+            camera.position.copy(camTarget.clone().add(new THREE.Vector3(0, 2.5, 5)))
+            controls.update()
+        } catch (e) {}
+
         mixer = new THREE.AnimationMixer(model)
         walkAction = mixer.clipAction(gltf.animations[0])
 
@@ -241,12 +517,13 @@ gltfLoader.load(
         idleAction = mixer.clipAction(idleClip)
 
         idleAction.play()
+
+        
     },
     undefined,
     err => console.error('Error cargando modelo:', err)
 )
 
-// colisiones
 function getGroundYAtPosition(pos) {
     const origin = new THREE.Vector3(pos.x, 20, pos.z)
     downRay.set(origin, new THREE.Vector3(0, -1, 0))
@@ -263,16 +540,39 @@ function getGroundYAtPosition(pos) {
 }
 
 function detectHorizontalCollision(newPos) {
-    const boxSize = new THREE.Vector3(0.45, 1.0, 0.45)
-    const tempBox = new THREE.Box3().setFromCenterAndSize(
-        new THREE.Vector3(newPos.x, newPos.y + 0.5, newPos.z),
-        boxSize
-    )
+    
+    if (!model) return false
 
-    for (let o of obstacleMeshes) {
-        const box = new THREE.Box3().setFromObject(o)
-        if (tempBox.intersectsBox(box)) return true
+    const origin = model.position.clone()
+    origin.y += 0.5 
+
+    const dir = new THREE.Vector3(newPos.x - model.position.x, 0, newPos.z - model.position.z)
+    if (dir.length() === 0) return false
+    dir.normalize()
+
+    const maxDist = 0.6
+    const ray = new THREE.Raycaster(origin, dir, 0, maxDist)
+
+    const targets = loadedScene ? [loadedScene] : scene.children
+    const hits = ray.intersectObjects(targets, true)
+
+    for (let h of hits) {
+        if (!h.object) continue
+        if (h.object === model) continue
+
+        try {
+            const b = new THREE.Box3().setFromObject(h.object)
+            const s = new THREE.Vector3()
+            b.getSize(s)
+            const area = s.x * s.z
+            if (area < 0.02) continue
+        } catch (e) {
+
+        }
+
+        return true
     }
+
     return false
 }
 
@@ -293,10 +593,18 @@ function tick() {
 
     if (model) {
         if (!initialGroundSet && (groundMeshes.length > 0 || obstacleMeshes.length > 0)) {
-            const gy = getGroundYAtPosition(model.position)
-            if (gy !== null) {
-                model.position.y = gy + modelGroundOffset
+            
+            const sceneOffsetInit = sceneGroundYOffset[currentSceneIndex] || 0
+            const topY = findGroundTopUnderPosition(model.position)
+            if (topY !== null && Number.isFinite(topY)) {
+                placeModelOnGroundY(topY + modelGroundOffset + sceneOffsetInit)
                 initialGroundSet = true
+            } else {
+                const gy = getGroundYAtPosition(model.position)
+                if (gy !== null) {
+                    placeModelOnGroundY(gy + modelGroundOffset + sceneOffsetInit)
+                    initialGroundSet = true
+                }
             }
         }
 
@@ -361,10 +669,19 @@ function tick() {
             }
         }
 
-        const gy = getGroundYAtPosition(model.position)
-        if (gy !== null) model.position.y = gy + modelGroundOffset
+        
+        const sceneOffsetLive = sceneGroundYOffset[currentSceneIndex] || 0
+        const topY2 = findGroundTopUnderPosition(model.position)
+        if (topY2 !== null && Number.isFinite(topY2)) {
+            placeModelOnGroundY(topY2 + modelGroundOffset + sceneOffsetLive)
+        } else {
+            const gy2 = getGroundYAtPosition(model.position)
+            if (gy2 !== null) placeModelOnGroundY(gy2 + modelGroundOffset + sceneOffsetLive)
+        }
 
         updateCameraFollow()
+
+        
     }
 
     controls.update()
@@ -388,3 +705,22 @@ if (rightEl) rightEl.addEventListener('click', () => {
     currentSceneIndex = (currentSceneIndex + 1) % scenesList.length
     loadScene(currentSceneIndex)
 })
+
+// Instructions modal
+const instructionsModal = document.getElementById('instructionsModal')
+const closeInstructionsBtn = document.getElementById('closeInstructions')
+
+if (closeInstructionsBtn) {
+    closeInstructionsBtn.addEventListener('click', () => {
+        instructionsModal.classList.add('hidden')
+    })
+}
+
+// Optional: close modal when clicking outside the content area
+if (instructionsModal) {
+    instructionsModal.addEventListener('click', (e) => {
+        if (e.target === instructionsModal) {
+            instructionsModal.classList.add('hidden')
+        }
+    })
+}
