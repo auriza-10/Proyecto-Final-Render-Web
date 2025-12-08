@@ -97,6 +97,7 @@ window.addEventListener("keyup", e => { if (e.key.toLowerCase() in keys) keys[e.
 
 // Scene loading state
 let isSceneLoading = false
+let hasShownInstructions = false
 
 // Raycaster para suelo
 const downRay = new THREE.Raycaster()
@@ -490,6 +491,16 @@ function loadScene(index) {
             }
             
             isSceneLoading = false
+
+            // After first successful load: hide splash and show instructions modal
+            if (!hasShownInstructions) {
+                const splash = document.getElementById('splashScreen')
+                const instr = document.getElementById('instructionsModal')
+                if (splash) splash.classList.add('hidden')
+                if (instr) instr.classList.remove('hidden')
+                hasShownInstructions = true
+            }
+
             const leftEl = document.querySelector('.left-arrow')
             const rightEl = document.querySelector('.right-arrow')
             if (leftEl) leftEl.style.opacity = '0.5'

@@ -1,3 +1,6 @@
+@import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400..700;1,400..700&display=swap');
+
+
 *
 {
     margin: 0;
@@ -39,8 +42,32 @@ body
     pointer-events: none;
 }
 
+/* Splash screen */
+.splash-screen {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(180deg, rgba(10,30,10,1) 0%, rgba(25,60,30,1) 100%);
+    z-index: 11000;
+}
+.splash-screen .splash-content h1 {
+    color: #c8f7d4;
+    font-size: 3rem;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    font-family: 'Libre Baskerville', serif;
+}
+
+.splash-screen.hidden {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s ease;
+}
+
 .instructions-content {
-    background: linear-gradient(135deg, #0d3d1a 0%, #1a5c2a 100%);
+    background: rgba(154, 199, 118, 0.9);
     border: 2px solid #2d7d3d;
     border-radius: 15px;
     padding: 40px;
@@ -49,7 +76,7 @@ body
     position: relative;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
     color: #e0f5e9;
-    font-family: Arial, sans-serif;
+    font-family: 'Libre Baskerville', serif;
 }
 
 .instructions-content h1 {
@@ -72,13 +99,13 @@ body
     font-size: 1.1rem;
     line-height: 1.6;
     padding: 12px;
-    background-color: rgba(76, 175, 80, 0.1);
+    background-color: rgba(186, 226, 149, 0.1);
     border-left: 3px solid #4caf50;
     border-radius: 5px;
 }
 
 .instructions-list p strong {
-    color: #81c784;
+    color: #185f1b;
 }
 
 .close-btn {
@@ -88,7 +115,7 @@ body
     width: 40px;
     height: 40px;
     border: none;
-    background-color: #4caf50;
+    background-color: #ceef74;
     color: white;
     font-size: 28px;
     cursor: pointer;
